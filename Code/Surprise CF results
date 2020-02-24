@@ -1,0 +1,46 @@
+import numpy as np 
+import pandas as pd
+import random
+
+from surprise import Dataset
+from surprise import KNNBasic, KNNBaseline, KNNWithMeans
+from surprise import SVDpp, SVD
+from surprise import SlopeOne, CoClustering, NMF
+from surprise import BaselineOnly, NormalPredictor
+from surprise.model_selection import KFold
+from surprise import Reader
+
+def generate_ml_df_results(algos, folds):
+    p_dict = {}
+    kf = KFold(n_splits=folds)
+    c = 0
+    for trainset, testset in kf.split(data):
+        c = c + 1
+        for klass in algos:
+            klass.fit(trainset)        
+            predictions = klass.test(testset)
+            for p in predictions:
+                key = (p.uid, p.iid, c)
+                algo_name = klass.__class__.__name__
+                if key not in p_dict:
+                    p_dict[key] = { 'userid': p.uid, 'movieid': p.iid, 'rating': p.r_ui, 'fold': c }
+                delta = np.abs(p.est - p.r_ui )
+                #p_dict[key][str(algo_name)+'_est'] = p.est
+                p_dict[key][str(algo_name)+'_delta'] = delta
+                
+            
+    return pd.DataFrame(p_dict.values())
+
+
+#set RNG
+np.random.seed(0)
+random.seed(0)
+   
+reader = Reader(rating_scale = (0,5))
+ratings = pd.read_csv(r'C:\Users\niall\OneDrive\Documents\Laura - College\MovieLens\Datasets\ratings.csv')
+ratings.drop(['timestamp'], axis = 1, inplace = True)
+data = Dataset.load_from_df(ratings, reader)
+
+algos = (BaselineOnly(), NormalPredictor(), SlopeOne(), CoClustering(), NMF(), KNNBasic(), KNNWithMeans(), KNNBaseline(), SVD(), SVDpp())
+
+surprise_res_mae_all = generate_ml_df_results(algos, 5)
