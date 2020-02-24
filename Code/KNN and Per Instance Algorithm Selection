@@ -1,0 +1,255 @@
+import numpy as np
+import pandas as pd
+import lightgbm as lgb
+from sklearn.preprocessing import StandardScaler 
+from surprise import Dataset, Reader
+from surprise import SVDpp, KNNBasic
+from sklearn.metrics import confusion_matrix
+from sklearn.neighbors import KNeighborsClassifier
+from surprise import dump
+from sklearn import metrics
+
+# =============================================================================
+#  LGBM data 
+# =============================================================================
+X =rate_user_genre_scaled.loc[:, rate_user_genre.columns != 'rating']
+y = ratings['rating']
+
+
+X_train = X.loc[:79999, :]
+y_train = y.loc[:79999]
+X_test = X.loc[80000:, :]
+y_test =  y.loc[80000:]
+
+
+LGBM = lgb.LGBMRegressor(random_state=1)
+LGBM.fit(X_train, y_train)
+LGBM_pred = LGBM.predict(X_test)
+LGBM_test = rate_user_genre.loc[80000:,['userid', 'movieid', 'rating']]
+LGBM_test['LGBM_predict'] = LGBM_pred
+LGBM_test = LGBM_test.reset_index()
+LGBM_test.drop(['index'], axis = 1 , inplace = True)
+
+
+
+# =============================================================================
+# KNNBasic
+# =============================================================================
+reader = Reader(rating_scale = (0,5))
+data = Dataset.load_from_df(ratings, reader)
+
+raw_ratings = data.raw_ratings
+threshold = int(.8 * len(raw_ratings))
+A_raw_ratings = raw_ratings[:threshold]
+B_raw_ratings = raw_ratings[threshold:]
+
+data.raw_ratings = A_raw_ratings  # data is now the set A
+trainset = data.build_full_trainset()
+algo_knn = KNNBasic(random_state=1)
+algo_knn.fit(trainset)         
+testset = data.construct_testset(B_raw_ratings)                    
+predictions_knn = algo_knn.test(testset)
+dump.dump('./dump_file', predictions_knn, algo_knn)
+predictions_knn, algo_knn = dump.load('./dump_file')
+
+KNN_test = pd.DataFrame(predictions_knn, columns=['userid', 'movieid', 'rating', 'KNN_predict', 'details'])    
+KNN_test.drop(['details'], axis =1 , inplace = True)
+
+# =============================================================================
+# SVD++
+# =============================================================================
+reader = Reader(rating_scale = (0,5))
+data = Dataset.load_from_df(ratings, reader)
+
+raw_ratings = data.raw_ratings
+threshold = int(.8 * len(raw_ratings))
+A_raw_ratings = raw_ratings[:threshold]
+B_raw_ratings = raw_ratings[threshold:]
+
+data.raw_ratings = A_raw_ratings  # data is now the set A
+trainset = data.build_full_trainset()
+algo = SVDpp(random_state=1)
+algo.fit(trainset)         
+testset = data.construct_testset(B_raw_ratings)                    
+predictions = algo.test(testset)
+dump.dump('./dump_file', predictions, algo)
+predictions, algo = dump.load('./dump_file')
+
+SVDpp_test = pd.DataFrame(predictions, columns=['userid', 'movieid', 'rating', 'SVDpp_predict', 'details'])    
+SVDpp_test.drop(['details'], axis =1 , inplace = True)
+
+
+# =============================================================================
+# Slope One
+# =============================================================================
+reader = Reader(rating_scale = (0,5))
+data = Dataset.load_from_df(ratings, reader)
+
+raw_ratings = data.raw_ratings
+threshold = int(.8 * len(raw_ratings))
+A_raw_ratings = raw_ratings[:threshold]
+B_raw_ratings = raw_ratings[threshold:]
+
+data.raw_ratings = A_raw_ratings  # data is now the set A
+trainset = data.build_full_trainset()
+algo = SlopeOne()
+algo.fit(trainset)         
+testset = data.construct_testset(B_raw_ratings)                    
+predictions = algo.test(testset)
+dump.dump('./dump_file', predictions, algo)
+predictions, algo = dump.load('./dump_file')
+
+S1_test = pd.DataFrame(predictions, columns=['userid', 'movieid', 'rating', 'S1_predict', 'details'])    
+S1_test.drop(['details'], axis =1 , inplace = True)
+
+
+
+# =============================================================================
+# CoClustering
+# =============================================================================
+reader = Reader(rating_scale = (0,5))
+data = Dataset.load_from_df(ratings, reader)
+
+raw_ratings = data.raw_ratings
+threshold = int(.8 * len(raw_ratings))
+A_raw_ratings = raw_ratings[:threshold]
+B_raw_ratings = raw_ratings[threshold:]
+
+data.raw_ratings = A_raw_ratings  # data is now the set A
+trainset = data.build_full_trainset()
+algo = CoClustering(random_state=1)
+algo.fit(trainset)         
+testset = data.construct_testset(B_raw_ratings)                    
+predictions = algo.test(testset)
+dump.dump('./dump_file', predictions, algo)
+predictions, algo = dump.load('./dump_file')
+
+CoCl_test = pd.DataFrame(predictions, columns=['userid', 'movieid', 'rating', 'CoCl_predict', 'details'])    
+CoCl_test.drop(['details'], axis =1 , inplace = True)
+
+# =============================================================================
+# Joined predictions 
+# =============================================================================
+two_alg = SVDpp_test.join(LGBM_test.set_index(['userid', 'movieid', 'rating']) , on = ['userid', 'movieid', 'rating'])
+two_alg = two_alg.join(S1_test.set_index(['userid', 'movieid', 'rating']) , on = ['userid', 'movieid', 'rating'])
+two_alg = two_alg.join(CoCl_test.set_index(['userid', 'movieid', 'rating']) , on = ['userid', 'movieid', 'rating'])
+two_alg = two_alg.join(KNN_test.set_index(['userid', 'movieid', 'rating']) , on = ['userid', 'movieid', 'rating'])
+
+
+two_alg['SVDpp_error'] = np.abs(np.subtract(two_alg['rating'], two_alg['SVDpp_predict']))
+two_alg['LGBM_error'] = np.abs(np.subtract(two_alg['rating'], two_alg['LGBM_predict']))
+two_alg['S1_error'] = np.abs(np.subtract(two_alg['rating'], two_alg['S1_predict']))
+two_alg['CoCl_error'] = np.abs(np.subtract(two_alg['rating'], two_alg['CoCl_predict']))
+two_alg['KNN_error'] = np.abs(np.subtract(two_alg['rating'], two_alg['KNN_predict']))
+
+
+two_alg['base_2alg'] = np.divide(np.add(two_alg['SVDpp_error'], two_alg['LGBM_error']), 2)
+sum1 = np.add(two_alg['SVDpp_error'], two_alg['LGBM_error'])
+sum2 = np.add(two_alg['S1_error'], two_alg['CoCl_error'])
+sum3 = np.add(sum1, sum2)
+sum4 = np.add(sum3 , two_alg['KNN_error'])
+two_alg['base_5alg'] = np.divide(sum4, 5)
+two_alg.iloc[:, 5:].mean()
+
+
+
+
+# =============================================================================
+# PCA and KMeans
+# =============================================================================
+pca = PCA(n_components = 3, random_state=1) 
+pca = pca.fit_transform(rate_user_genre_scaled)
+pca = pd.DataFrame(pca) 
+
+kmeans = KMeans(n_clusters=25, random_state= 1)
+kmeans.fit(pca)
+kmeans_userslabels = pd.DataFrame(kmeans.predict(pca))
+
+results_mae['Cluster'] = kmeans_userslabels
+means_clusters = results_mae.groupby(['Cluster'], sort = True).mean().iloc[:,3:17]
+countma_clusters = results_mae.groupby(['Cluster', 'Most_Acc'], sort = True).count().iloc[:,1]
+
+
+
+## KNN to get cluster splitting dataa
+## dataset withiut rating and with cluster 
+dataset_no_rating = rate_user_genre_scaled.drop(['rating'], axis = 1, inplace = False)
+dataset_no_rating['Cluster'] = kmeans_userslabels 
+
+Xc =dataset_no_rating.loc[:, dataset_no_rating.columns != 'Cluster']
+yc = dataset_no_rating['Cluster']
+Xc_train = Xc.loc[:79999, :]
+yc_train = yc.loc[:79999]
+Xc_test = Xc.loc[80000:, :]
+yc_test =  yc.loc[80000:]
+
+
+knn = KNeighborsClassifier(n_neighbors=7, metric='euclidean')
+knn.fit(Xc_train, yc_train)
+yc_pred = knn.predict(Xc_test)
+knn_test = rate_user_genre.loc[80000:,['userid', 'movieid', 'rating']]
+knn_test['knn_predict'] = yc_pred
+
+SS_distances = []
+K = range(1,25)
+for k in K:
+    knn = KNeighborsClassifier(n_neighbors=k, metric='euclidean')
+    knn = knn.fit(Xc_train, yc_train)
+    yc_pred = knn.predict(Xc_test)
+    acc = metrics.accuracy_score(yc_test, yc_pred)
+    SS_distances.append(acc)
+
+plt.plot(K, SS_distances)
+plt.xlabel('k')
+plt.ylabel('Accuracy')
+plt.title('Elbow plot for k')
+plt.show()
+
+
+print("Accuracy:",metrics.accuracy_score(yc_test, yc_pred))
+#confusion_matrix(yc_test, yc_pred)
+#
+#value = np.arange(5, 16, 2)
+#for i in value:
+#    knn = KNeighborsClassifier(n_neighbors=i, metric='euclidean')
+#    model = knn.fit(Xc_train, yc_train)
+#    yc_pred = knn.predict(Xc_test)
+#    w = metrics.accuracy_score(yc_test, yc_pred)
+#    print(i)
+#    print(w)
+    
+    
+# =============================================================================
+    # LGBM  - 0,3,5,6
+    # SVD++ - 1,2,4,7,8,9 
+# =============================================================================
+two_alg['knn_predict'] = yc_pred
+
+##Need to be changed manually depending on results - should really write function to do automatically
+LGBM_clusters = (1,2,4,5,10,11,12,14,15,17,19,23,24)
+SVDpp_clusters = (0,3,6,7,8,13,16,18,21,22,20, 9)
+S1_clusters = (12,9999)
+CoCl_clusters = (9,999) 
+KNN_clusters = (21,11)
+
+lgbm_clust = two_alg[['userid', 'movieid', 'rating', 'LGBM_error']].loc[two_alg['knn_predict'].isin(LGBM_clusters)]
+svdpp_clust = two_alg[['userid', 'movieid', 'rating', 'SVDpp_error']].loc[two_alg['knn_predict'].isin(SVDpp_clusters)]
+s1_clust = two_alg[['userid', 'movieid', 'rating', 'S1_error']].loc[two_alg['knn_predict'].isin(S1_clusters)]
+cocl_clust = two_alg[['userid', 'movieid', 'rating', 'CoCl_error']].loc[two_alg['knn_predict'].isin(CoCl_clusters)]
+knn_clust = two_alg[['userid', 'movieid', 'rating', 'KNN_error']].loc[two_alg['knn_predict'].isin(KNN_clusters)]
+
+
+two_alg_clust = pd.merge(two_alg, lgbm_clust, on=['userid', 'movieid', 'rating'], how = 'left')
+two_alg_clust = pd.merge(two_alg_clust, svdpp_clust, on=['userid', 'movieid', 'rating'], how = 'left')
+two_alg_clust = pd.merge(two_alg_clust, s1_clust, on=['userid', 'movieid', 'rating'], how = 'left')
+two_alg_clust = pd.merge(two_alg_clust, cocl_clust, on=['userid', 'movieid', 'rating'], how = 'left')
+two_alg_clust = pd.merge(two_alg_clust, knn_clust, on=['userid', 'movieid', 'rating'], how = 'left')
+
+
+two_alg_clust['Combined_error'] = two_alg_clust['LGBM_error_y'].fillna(two_alg_clust['SVDpp_error_y'])
+two_alg_clust['Combined_error'] = two_alg_clust['Combined_error'].fillna(two_alg_clust['S1_error_y'])
+two_alg_clust['Combined_error'] = two_alg_clust['Combined_error'].fillna(two_alg_clust['CoCl_error_y'])
+two_alg_clust['Combined_error'] = two_alg_clust['Combined_error'].fillna(two_alg_clust['KNN_error_y'])
+
+pd.DataFrame(two_alg_clust.mean())
+
