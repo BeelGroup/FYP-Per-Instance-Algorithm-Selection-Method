@@ -1,0 +1,107 @@
+import numpy as np
+import lightgbm as lgb
+import pandas as pd
+import sklearn
+from sklearn.model_selection import cross_val_predict
+from sklearn.preprocessing import StandardScaler 
+from sklearn.model_selection import RandomizedSearchCV
+from sklearn.model_selection import train_test_split
+
+
+## Reading in data sets
+users_copy = pd.read_csv(r'C:\Users\niall\OneDrive\Documents\Laura - College\MovieLens\Datasets\users.csv')
+movies = pd.read_csv(r'C:\Users\niall\OneDrive\Documents\Laura - College\MovieLens\Datasets\movies.csv', encoding = 'latin')
+ratings = pd.read_csv(r'C:\Users\niall\OneDrive\Documents\Laura - College\MovieLens\Datasets\ratings.csv')
+
+## Reading in zipcode dataset buikt from us census data. Used to replace zip code with median household income 
+zip_income = pd.read_csv(r'C:\Users\niall\OneDrive\Documents\Laura - College\MovieLens\Datasets\Median.csv')
+
+##droping timestamp as it is not used in surprise function (as required by suprise)
+ratings.drop(['timestamp'], axis=1, inplace= True)
+
+# =============================================================================
+# Data Cleaning
+# =============================================================================
+#replace zip code with median household income 
+users_copy['zipCode']= np.where(users_copy['zipCode'].str.isnumeric(), users_copy['zipCode'], 0)
+users_copy['zipCode']= users_copy['zipCode'].astype(str).astype(int)
+users_copy = pd.merge(users_copy, zip_income[['zipCode', 'Median_Income']], on= 'zipCode', how='left')
+users_copy.drop(['zipCode'], axis=1, inplace= True)
+mu_age = round(np.mean(users_copy['Median_Income']), 0)
+users_copy['Median_Income']= users_copy['Median_Income'].fillna(mu_age)
+
+#joining ratings and user
+rate_user = ratings.join(users_copy.set_index('userid') , on = 'userid')
+#dummy encoding categorical variables and dropping 
+rate_user = pd.concat([rate_user ,pd.get_dummies(rate_user['gender'], prefix='Gender' , drop_first=True)],axis=1)
+rate_user = pd.concat([rate_user ,pd.get_dummies(rate_user['occupation'], prefix='Occ' , drop_first=True )],axis=1)
+rate_user.drop(['gender'], axis=1, inplace= True)
+rate_user.drop(['occupation'], axis=1, inplace= True)
+
+#dropping some movie columns 
+# changing dd/mm/yy to year only for release date
+movies= movies.rename(columns = {'movieid ' :'movieid'})
+movies.drop([' movie title '], axis =1, inplace = True)
+movies[' release date '] = movies[' release date '].str[-2:]
+movies[' release date ']= movies[' release date '].fillna(0)
+movies[' release date ']= movies[' release date '].astype(str).astype(int)
+movies.drop([' video release date '], axis =1, inplace = True)
+movies.drop([' IMDb URL '], axis =1, inplace = True)
+
+#oining rating,users dataset to movies
+rate_user_genre = rate_user.join(movies.set_index('movieid') , on = 'movieid')
+
+#creating user and movie stats: mean, std, min, max, median and count
+userstats = rate_user_genre.groupby('userid', as_index=False)['rating'].agg({'usermean':np.mean,'userstd':np.std,'usermin':np.min, 'usermax':np.max,'usermedian':np.median,'usercount' : 'count' })
+moviestats = rate_user_genre.groupby('movieid', as_index=False)['rating'].agg({'moviemean':np.mean,'moviestd':lambda x : np.std(x, ddof=0),'moviemin':np.min, 'moviemax':np.max, 'moviemedian':np.median,'moviecount' : 'count'})
+
+#joinn user and movie stats to rate_user_genre dataset (ratings, user and movies combined)
+rate_user_genre = rate_user_genre.join(userstats.set_index('userid') , on = 'userid')
+rate_user_genre = rate_user_genre.join(moviestats.set_index('movieid') , on = 'movieid')
+
+
+## Scaling
+rate_user_genre_colnames = rate_user_genre.columns
+scaler = StandardScaler()
+rate_user_genre_scaled = pd.DataFrame(scaler.fit_transform(rate_user_genre), columns = rate_user_genre_colnames) 
+
+
+# =============================================================================
+# Light Gradient Boosting Machines
+# =============================================================================
+# splitting data
+X =rate_user_genre_scaled.loc[:, rate_user_genre_scaled.columns != 'rating']
+y = rate_user_genre['rating']
+
+LGBM = lgb.LGBMRegressor()
+#5-fold cross validation for prediction 
+cv_predict_LGBM = cross_val_predict(LGBM, X, y, cv=5)
+
+#storing results
+LGBM_res_mae  = rate_user_genre[['userid', 'movieid', 'rating']]
+LGBM_res_mae['LGBM_delta'] = np.abs(np.subtract(y, cv_predict_LGBM))
+
+
+# =============================================================================
+# Linear regression
+# =============================================================================
+# splitting data
+X =rate_user_genre_scaled.loc[:, rate_user_genre_scaled.columns != 'rating']
+y = rate_user_genre['rating']
+
+linear_reg = linear_model.LinearRegression() 
+#5-fold cross validation for prediction 
+cv_predict_reg= cross_val_predict(linear_reg, X, y, cv=5)
+
+## Storing results
+LR_res_mae  = rate_user_genre[['userid', 'movieid', 'rating']]
+LR_res_mae['Reg_delta'] = np.abs(np.subtract(y, cv_predict_reg))
+
+
+
+
+
+
+
+
+
