@@ -1,7 +1,6 @@
 import numpy as np 
 import pandas as pd
 import random
-
 from surprise import Dataset
 from surprise import KNNBasic, KNNBaseline, KNNWithMeans
 from surprise import SVDpp, SVD
@@ -10,6 +9,8 @@ from surprise import BaselineOnly, NormalPredictor
 from surprise.model_selection import KFold
 from surprise import Reader
 
+## function to generate results for all algorithms:
+# returns df with userid, movieid, rating and MAE for all algorithms
 def generate_ml_df_results(algos, folds):
     p_dict = {}
     kf = KFold(n_splits=folds)
@@ -35,12 +36,17 @@ def generate_ml_df_results(algos, folds):
 #set RNG
 np.random.seed(0)
 random.seed(0)
-   
+
+#using ratings dataset downloaded from grouplens website instead of inbuilt movielens dataset as cannot view Dataset in surpirse. 
+#remove timestampas not used in CF algorithms 
+#reader sets rating scale 0-5
 reader = Reader(rating_scale = (0,5))
 ratings = pd.read_csv(r'C:\Users\niall\OneDrive\Documents\Laura - College\MovieLens\Datasets\ratings.csv')
 ratings.drop(['timestamp'], axis = 1, inplace = True)
 data = Dataset.load_from_df(ratings, reader)
 
+#algorithms to be fed into function. Using all algorithms available in surprise
 algos = (BaselineOnly(), NormalPredictor(), SlopeOne(), CoClustering(), NMF(), KNNBasic(), KNNWithMeans(), KNNBaseline(), SVD(), SVDpp())
 
+#call function with 5-fold cross validation
 surprise_res_mae_all = generate_ml_df_results(algos, 5)
