@@ -6,31 +6,21 @@ from sklearn.decomposition import PCA
 from matplotlib import pyplot as plt
 import itertools
 
-
+## Merging all rsults : suprise algorithm results, LGBM results and Linear Regression results
 surprise_res_mae_all[['userid', 'movieid', 'rating']] = surprise_res_mae_all[['userid', 'movieid', 'rating']].astype(str).astype(float)
 results_mae = LGBM_res_mae.join(surprise_res_mae_all.set_index(['userid', 'movieid', 'rating']) , on = ['userid', 'movieid', 'rating'])
 results_mae = LGBM_no_extra_res_mae.join(results_mae.set_index(['userid', 'movieid', 'rating']) , on = ['userid', 'movieid', 'rating'])
 results_mae = LR_res_mae.join(results_mae.set_index(['userid', 'movieid', 'rating']) , on = ['userid', 'movieid', 'rating'])
 results_mae = LR_no_extra_res_mae.join(results_mae.set_index(['userid', 'movieid', 'rating']) , on = ['userid', 'movieid', 'rating'])
 
-#results_mae.drop(['NormalPredictor_delta'], axis=1, inplace = True)
-
-## leaving out 'GNB_delta' due to uch higher mae 1.17 vs ~0.90s
-#results_mae= results_mae[['userid','movieid', 'rating', 'BaselineOnly_delta', 'CoClustering_delta','KNNBaseline_delta', 'KNNBasic_delta','LGBM_delta', 'Reg_delta', 'SVDpp_delta', 'SlopeOne_delta',]]
-
-results_mae.to_csv(r'C:\Users\niall\OneDrive\Documents\Laura - College\MovieLens\MAE\all alg results 291.csv')
-
-results_mae = pd.read_csv(r'C:\Users\niall\OneDrive\Documents\Laura - College\MovieLens\MAE\all alg results 291.csv') 
-results_mae.drop(['Unnamed: 0'], axis=1, inplace= True)
-
-results_mae.drop(['fold'], axis=1, inplace= True)
+#writing results to csv for future use and reading in results
+#results_mae.to_csv(r'C:\Users\niall\OneDrive\Documents\Laura - College\MovieLens\MAE\all alg results 291.csv')
+#results_mae = pd.read_csv(r'C:\Users\niall\OneDrive\Documents\Laura - College\MovieLens\MAE\all alg results 291.csv') 
+#results_mae.drop(['Unnamed: 0'], axis=1, inplace= True)
+#results_mae.drop(['fold'], axis=1, inplace= True)
 
 
-#### Perfect metalearner
-df = pd.DataFrame(results_mae[[ 'SVDpp_delta', 'LGBM_delta', 'SlopeOne_delta', 'KNNBasic_delta', 'CoClustering_delta']])
-min_error = df.min(axis=1)
-min_error.mean()
-
+#### Perfect metalearner: function to combine algorithms in best possible way based on MAE result from 1-14 algorithms
 alg = ['BaselineOnly_delta', 'NormalPredictor_delta','NMF_delta', 'KNNWithMeans_delta', 'SVD_delta', 'KNNBasic_delta', 'KNNBaseline_delta','SVDpp_delta', 'SlopeOne_delta', 'CoClustering_delta', 'LGBM_delta', 'LGBM_no_extra_delta', 'Reg_delta', 'Reg_no_extra_delta']
 
 def compute_n_algos(algs, x):
@@ -54,33 +44,32 @@ def compute_df_of_lowest_error_for_each_combination_size(algs):
     return df
 
 mae_combinations = compute_df_of_lowest_error_for_each_combination_size(alg)
-print (mae_combinations)
 
 
 
-## MAE and count
+## aadding columns to df with most and least accurate algorithm
 results_mae['Most_Acc'] = results_mae.iloc[:, 3:17].idxmin(axis=1)
 results_mae['Least_Acc'] = results_mae.iloc[:, 3:17].idxmax(axis=1)
-#results_mae.drop(['fold'], axis = 1 , inplace = True)
 
+## Overall results: MAE of each algorithm, count of number and % of times each algorithm is best and worst
 results_mae_acc = pd.DataFrame()
 results_mae_acc['Count_most_acc'] = results_mae.groupby(['Most_Acc'], sort = True).count().iloc[:,1]
 results_mae_acc['percent_most_acc'] = (results_mae_acc['Count_most_acc']/results_mae_acc['Count_most_acc'].sum())*100
 results_mae_acc['Count_least_acc'] = results_mae.groupby(['Least_Acc'], sort = True).count().iloc[:,1]
 results_mae_acc['percent_least_acc'] = (results_mae_acc['Count_least_acc']/results_mae_acc['Count_least_acc'].sum())*100
-means = results_mae.iloc[:, 3:17].mean()
-mae = (means)
+mae = results_mae.iloc[:, 3:17].mean()
 results_mae_acc['mae'] = mae
-results_mae_acc.to_csv(r'C:\Users\niall\OneDrive\Documents\Laura - College\MovieLens\MAE\Count and MAE.csv')
+##writing to csv
+#results_mae_acc.to_csv(r'C:\Users\niall\OneDrive\Documents\Laura - College\MovieLens\MAE\Count and MAE.csv')
 
 
 
-## PCA for kmeans using rating, user features, movies features- scaled see linear regression for data
+## PCA for kmeans using all features including added user and item features
 pca = PCA(n_components = 3) 
 pca = pca.fit_transform(rate_user_genre_scaled)
 pca = pd.DataFrame(pca) 
 
-##Kmeans
+##Kmeans loop for elbow plot
 SS_distances = []
 K = range(1,25)
 for k in K:
@@ -94,26 +83,19 @@ plt.ylabel('WSS_distances')
 plt.title('Elbow plot for k')
 plt.show()
 
+#kmeans with selected number of clusters
 kmeans = KMeans(n_clusters=10, random_state= 1)
 kmeans.fit(pca)
 kmeans_userslabels = pd.DataFrame(kmeans.predict(pca))
 
-#results_mae.drop(['Cluster'], axis = 1, inplace= True)
+#adding kmeans labels to result dataset
 results_mae['Cluster'] = kmeans_userslabels
 #results_mae.to_csv(r'C:\Users\Me\Documents\College\Final Year Project\Final Year project\MovieLens\all with clusters alg.csv')
-#results_mae = pd.read_csv(r'C:\Users\Me\Documents\College\Final Year Project\Final Year project\MovieLens\all with clusters alg.csv')
-#results_mae.drop(['Unnamed: 0'], axis = 1, inplace = True)
-#kmeans_userslabels= results_mae['Cluster']
 
-#### mae by cluser
+
+#### MAE and Count of number of times most accurate by cluster
 means_clusters = results_mae.groupby(['Cluster'], sort = True).mean().iloc[:,3:1]
-#mae_clusters = (means_clusters)
-#mae_clusters.to_csv(r'C:\Users\niall\OneDrive\Documents\Laura - College\MovieLens\MAE\10.csv')
-means_clusters.to_csv(r'C:\Users\niall\OneDrive\Documents\Laura - College\MovieLens\MAE\cluster rmse.csv')
-
-
 countma_clusters = results_mae.groupby(['Cluster', 'Most_Acc'], sort = True).count().iloc[:,1:11]
-countma_clusters.to_csv(r'C:\Users\niall\OneDrive\Documents\Laura - College\MovieLens\MAE\countma_clusters.csv')
 
 
 
